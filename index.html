@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GPS Tracking with Anti-Fake Location Check</title>
+  <title>GPS Tracking Identifying Status</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body {
@@ -44,7 +44,7 @@
 
     const FAKE_ACCURACY_THRESHOLD_METERS = 5;
     const FAKE_DURATION_SECONDS = 5;
-    const MIN_MOVEMENT_METERS = 0.1;
+    const MIN_MOVEMENT_METERS = 50;
 
     fetch("https://ipapi.co/json/")
       .then(res => res.json())
@@ -57,10 +57,10 @@
       })
       .catch(err => console.warn("IP location fetch failed", err));
 
-    function updateStatus(message, isFake) {
+    function updateStatus(message, color) {
       const status = document.getElementById("status");
       status.innerHTML = `Status: ${message}`;
-      status.style.color = isFake ? "red" : "green";
+      status.style.color = color;
     }
 
     function startWatching() {
@@ -88,7 +88,7 @@
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
         document.getElementById("output").innerHTML = "GPS tracking stopped.";
-        updateStatus("GPS tracking stopped.", false);
+        updateStatus("GPS tracking stopped.", "black");
       }
     }
 
@@ -97,7 +97,6 @@
       const lon = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
-      let isFakeLocation = false;
       let movementDistance = 0;
 
       if (lastPosition) {
@@ -115,23 +114,29 @@
         lowAccuracyCounter = 0;
       }
 
+      let statusMessage = "";
+      let statusColor = "";
+
       if (lowAccuracyCounter >= FAKE_DURATION_SECONDS) {
-        isFakeLocation = true;
+        statusMessage = "⚠️ Possible Fake Location Detected";
+        statusColor = "red";
+      } else if (lowAccuracyCounter > 0) {
+        statusMessage = `Identifying... (${lowAccuracyCounter}s)`;
+        statusColor = "orange";
+      } else {
+        statusMessage = "✔️ Real Location Detected";
+        statusColor = "green";
       }
 
       if (ipLocation) {
         const ipDist = getDistanceFromLatLonInKm(lat, lon, ipLocation.lat, ipLocation.lon);
         if (ipDist > 50) {
-          isFakeLocation = true;
+          statusMessage = "⚠️ Possible Fake Location Detected (IP mismatch)";
+          statusColor = "red";
         }
       }
 
-      updateStatus(
-        isFakeLocation
-          ? "⚠️ Possible Fake Location Detected"
-          : "✔️ Real Location Detected",
-        isFakeLocation
-      );
+      updateStatus(statusMessage, statusColor);
 
       lastPosition = { lat, lon };
 
@@ -188,7 +193,7 @@
           message = "An unknown error occurred.";
       }
       document.getElementById("output").innerText = message;
-      updateStatus(message, true);
+      updateStatus(message, "red");
     }
   </script>
 </body>
