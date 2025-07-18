@@ -1,124 +1,158 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>High Accuracy GPS Tracking with Map</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPS Tracking with Anti-Fake Check</title>
 
-  <!-- Leaflet CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet/dist/leaflet.css"
-  />
-  <style>
-    body {
-      margin: 0;
-      font-family: sans-serif;
-    }
-    #map {
-      height: 80vh;
-      width: 100%;
-    }
-    button {
-      margin: 10px;
-      padding: 10px 20px;
-    }
-  </style>
-</head>
-<body>
-  <button onclick="startWatching()">Start GPS Tracking</button>
-  <button onclick="stopWatching()">Stop GPS Tracking</button>
-  <div id="output"></div>
-  <div id="map"></div>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+      body {
+        margin: 0;
+        font-family: sans-serif;
+      }
+      #map {
+        height: 80vh;
+        width: 100%;
+      }
+      button {
+        margin: 10px;
+        padding: 10px 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <button onclick="startWatching()">Start GPS Tracking</button>
+    <button onclick="stopWatching()">Stop GPS Tracking</button>
+    <div id="output"></div>
+    <div id="map"></div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  <script>
-    let watchId = null;
-    let map;
-    let marker;
-    let circle;
+    <script>
+      let watchId = null;
+      let map;
+      let marker;
+      let circle;
 
-    function startWatching() {
-      if (!map) {
-        map = L.map("map").setView([0, 0], 2);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+      let lastPosition = null;
+      let lastTimestamp = null;
+
+      function startWatching() {
+        if (!map) {
+          map = L.map("map").setView([0, 0], 2);
+          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: "© OpenStreetMap contributors",
+          }).addTo(map);
+        }
+
+        if (navigator.geolocation) {
+          watchId = navigator.geolocation.watchPosition(showPosition, showError, {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0,
+          });
+          document.getElementById("output").innerHTML = "Waiting for GPS data...";
+        } else {
+          document.getElementById("output").innerText = "Geolocation not supported.";
+        }
       }
 
-      if (navigator.geolocation) {
-        watchId = navigator.geolocation.watchPosition(showPosition, showError, {
-          enableHighAccuracy: true,
-          timeout: 20000,
-          maximumAge: 0,
-        });
-        document.getElementById("output").innerHTML = "Waiting for GPS data...";
-      } else {
-        document.getElementById("output").innerText = "Geolocation not supported.";
+      function stopWatching() {
+        if (watchId !== null) {
+          navigator.geolocation.clearWatch(watchId);
+          watchId = null;
+          document.getElementById("output").innerHTML = "GPS tracking stopped.";
+        }
       }
-    }
 
-    function stopWatching() {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-        document.getElementById("output").innerHTML = "GPS tracking stopped.";
-      }
-    }
+      function showPosition(position) {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        const currentTime = new Date().getTime();
 
-    function showPosition(position) {
-      const lat = position.coords.latitude;
-      const lon = position.coords.longitude;
-      const accuracy = position.coords.accuracy;
+        if (accuracy > 1000) {
+          document.getElementById("output").innerHTML = `Low accuracy: ${accuracy.toFixed(2)} meters. Ignored.`;
+          return;
+        }
 
-      if (accuracy > 1000) {
+        if (lastPosition && lastTimestamp) {
+          const distance = getDistanceFromLatLonInKm(
+            lastPosition.lat,
+            lastPosition.lon,
+            lat,
+            lon
+          );
+          const timeDiff = (currentTime - lastTimestamp) / 1000; // seconds
+          const speed = distance / (timeDiff / 3600); // km/h
+
+          if (speed > 300) {
+            document.getElementById("output").innerHTML = `
+              Unrealistic speed detected: ${speed.toFixed(2)} km/h. Ignoring location.`;
+            return;
+          }
+        }
+
+        lastPosition = { lat, lon };
+        lastTimestamp = currentTime;
+
         document.getElementById("output").innerHTML = `
-          Low accuracy detected: ${accuracy.toFixed(2)} meters. Ignoring...`;
-        return;
-      }
+          Latitude: ${lat}<br>
+          Longitude: ${lon}<br>
+          Accuracy: ${accuracy.toFixed(2)} meters<br>`;
 
-      document.getElementById("output").innerHTML = `
-        Latitude: ${lat}<br>
-        Longitude: ${lon}<br>
-        Accuracy: ${accuracy.toFixed(2)} meters<br>`;
+        if (map) {
+          map.setView([lat, lon], 18);
 
-      if (map) {
-        map.setView([lat, lon], 18);
+          if (!marker) {
+            marker = L.marker([lat, lon]).addTo(map);
+          } else {
+            marker.setLatLng([lat, lon]);
+          }
 
-        if (!marker) {
-          marker = L.marker([lat, lon]).addTo(map);
-        } else {
-          marker.setLatLng([lat, lon]);
-        }
-
-        if (!circle) {
-          circle = L.circle([lat, lon], { radius: accuracy }).addTo(map);
-        } else {
-          circle.setLatLng([lat, lon]).setRadius(accuracy);
+          if (!circle) {
+            circle = L.circle([lat, lon], { radius: accuracy }).addTo(map);
+          } else {
+            circle.setLatLng([lat, lon]).setRadius(accuracy);
+          }
         }
       }
-    }
 
-    function showError(error) {
-      let message = "";
-      switch (error.code) {
-        case error.PERMISSION_DENIED:
-          message = "User denied the request for Geolocation.";
-          break;
-        case error.POSITION_UNAVAILABLE:
-          message = "Location information is unavailable.";
-          break;
-        case error.TIMEOUT:
-          message = "The request to get user location timed out.";
-          break;
-        case error.UNKNOWN_ERROR:
-          message = "An unknown error occurred.";
-          break;
+      function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) *
+            Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
       }
-      document.getElementById("output").innerText = message;
-    }
-  </script>
-</body>
+
+      function showError(error) {
+        let message = "";
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            message = "User denied the request for Geolocation.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            message = "Location information is unavailable.";
+            break;
+          case error.TIMEOUT:
+            message = "The request to get user location timed out.";
+            break;
+          case error.UNKNOWN_ERROR:
+            message = "An unknown error occurred.";
+            break;
+        }
+        document.getElementById("output").innerText = message;
+      }
+    </script>
+  </body>
 </html>
