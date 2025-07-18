@@ -1,218 +1,195 @@
-
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GPS Tracking with Anti-Fake Location Check + Movement Tracker</title>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GPS Tracking with Anti-Fake Location Check</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+    }
+    #map {
+      height: 80vh;
+      width: 100%;
+    }
+    button {
+      margin: 10px;
+      padding: 10px 20px;
+    }
+    #status {
+      font-weight: bold;
+      padding: 10px;
+      background: #f0f0f0;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Status: Waiting for GPS data...</div>
+  <button onclick="startWatching()">Start GPS Tracking</button>
+  <button onclick="stopWatching()">Stop GPS Tracking</button>
+  <div id="output"></div>
+  <div id="map"></div>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-    <style>
-      body {
-        margin: 0;
-        font-family: sans-serif;
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <script>
+    let watchId = null;
+    let map, marker, circle;
+    let lastPosition = null;
+    let ipLocation = null;
+    let lowAccuracyCounter = 0;
+    let totalMovementDistance = 0;
+
+    const FAKE_ACCURACY_THRESHOLD_METERS = 5;
+    const FAKE_DURATION_SECONDS = 5;
+    const MIN_MOVEMENT_METERS = 0.1;
+
+    fetch("https://ipapi.co/json/")
+      .then(res => res.json())
+      .then(data => {
+        ipLocation = {
+          lat: parseFloat(data.latitude),
+          lon: parseFloat(data.longitude),
+          city: data.city,
+        };
+      })
+      .catch(err => console.warn("IP location fetch failed", err));
+
+    function updateStatus(message, isFake) {
+      const status = document.getElementById("status");
+      status.innerHTML = `Status: ${message}`;
+      status.style.color = isFake ? "red" : "green";
+    }
+
+    function startWatching() {
+      if (!map) {
+        map = L.map("map").setView([0, 0], 2);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "© OpenStreetMap contributors",
+        }).addTo(map);
       }
-      #map {
-        height: 80vh;
-        width: 100%;
+
+      if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(
+          showPosition,
+          showError,
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+        );
+        document.getElementById("output").innerHTML = "Waiting for GPS data...";
+      } else {
+        document.getElementById("output").innerText = "Geolocation not supported.";
       }
-      button {
-        margin: 10px;
-        padding: 10px 20px;
+    }
+
+    function stopWatching() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        document.getElementById("output").innerHTML = "GPS tracking stopped.";
+        updateStatus("GPS tracking stopped.", false);
       }
-      #status {
-        font-weight: bold;
-        padding: 10px;
-        background: #f0f0f0;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="status">Status: Waiting for GPS data...</div>
-    <button onclick="startWatching()">Start GPS Tracking</button>
-    <button onclick="stopWatching()">Stop GPS Tracking</button>
-    <div id="output"></div>
-    <div id="map"></div>
+    }
 
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    function showPosition(position) {
+      const lat = position.coords.latitude;
+      const lon = position.coords.longitude;
+      const accuracy = position.coords.accuracy;
 
-    <script>
-      let watchId = null;
-      let map, marker, circle;
-      let lastPosition = null;
-      let lastTimestamp = null;
-      let ipLocation = null;
+      let isFakeLocation = false;
+      let movementDistance = 0;
 
-      let lowAccuracyCounter = 0;
-      let totalMovementDistance = 0;
-
-      const FAKE_ACCURACY_THRESHOLD_METERS = 5;
-      const FAKE_DURATION_SECONDS = 5;
-      const MIN_MOVEMENT_METERS = 0.1; // movement threshold per update
-
-      fetch("https://ipapi.co/json/")
-        .then((res) => res.json())
-        .then((data) => {
-          ipLocation = {
-            lat: parseFloat(data.latitude),
-            lon: parseFloat(data.longitude),
-            city: data.city,
-          };
-        })
-        .catch((err) => console.warn("IP location fetch failed", err));
-
-      function updateStatus(message, isFake) {
-        const status = document.getElementById("status");
-        status.innerHTML = `Status: ${message}`;
-        status.style.color = isFake ? "red" : "green";
-      }
-
-      function startWatching() {
-        if (!map) {
-          map = L.map("map").setView([0, 0], 2);
-          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: "© OpenStreetMap contributors",
-          }).addTo(map);
+      if (lastPosition) {
+        movementDistance = getDistanceFromLatLonInKm(
+          lastPosition.lat, lastPosition.lon, lat, lon
+        ) * 1000;
+        if (movementDistance >= MIN_MOVEMENT_METERS) {
+          totalMovementDistance += movementDistance;
         }
-
-        if (navigator.geolocation) {
-          watchId = navigator.geolocation.watchPosition(
-            showPosition,
-            showError,
-            {
-              enableHighAccuracy: true,
-              timeout: 20000,
-              maximumAge: 0,
-            }
-          );
-          document.getElementById("output").innerHTML =
-            "Waiting for GPS data...";
-        } else {
-          document.getElementById("output").innerText =
-            "Geolocation not supported.";
-        }
       }
 
-      function stopWatching() {
-        if (watchId !== null) {
-          navigator.geolocation.clearWatch(watchId);
-          watchId = null;
-          document.getElementById("output").innerHTML = "GPS tracking stopped.";
-          updateStatus("GPS tracking stopped.", false);
-        }
+      if (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS && movementDistance < MIN_MOVEMENT_METERS) {
+        lowAccuracyCounter++;
+      } else {
+        lowAccuracyCounter = 0;
       }
 
-      function showPosition(position) {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-        const accuracy = position.coords.accuracy;
+      if (lowAccuracyCounter >= FAKE_DURATION_SECONDS) {
+        isFakeLocation = true;
+      }
 
-        let isFakeLocation = false;
-        let movementDistance = 0;
-
-        if (lastPosition) {
-          movementDistance =
-            getDistanceFromLatLonInKm(
-              lastPosition.lat,
-              lastPosition.lon,
-              lat,
-              lon
-            ) * 1000;
-          if (movementDistance >= MIN_MOVEMENT_METERS) {
-            totalMovementDistance += movementDistance;
-          }
-        }
-
-        // Only increment lowAccuracyCounter if there’s no movement
-        if (
-          accuracy <= FAKE_ACCURACY_THRESHOLD_METERS &&
-          movementDistance < MIN_MOVEMENT_METERS
-        ) {
-          lowAccuracyCounter++;
-        } else {
-          lowAccuracyCounter = 0;
-        }
-
-        if (lowAccuracyCounter >= FAKE_DURATION_SECONDS) {
+      if (ipLocation) {
+        const ipDist = getDistanceFromLatLonInKm(lat, lon, ipLocation.lat, ipLocation.lon);
+        if (ipDist > 50) {
           isFakeLocation = true;
         }
-
-        if (ipLocation) {
-          const ipDist = getDistanceFromLatLonInKm(
-            lat,
-            lon,
-            ipLocation.lat,
-            ipLocation.lon
-          );
-          if (ipDist > 50) {
-            isFakeLocation = true;
-          }
-        }
-
-        updateStatus(
-          isFakeLocation
-            ? "⚠️ Possible Fake Location Detected"
-            : "✔️ Real Location Detected",
-          isFakeLocation
-        );
-
-        lastPosition = { lat, lon };
-
-        document.getElementById("output").innerHTML = `
-          Latitude: ${lat}<br>
-          Longitude: ${lon}<br>
-          Accuracy: ${accuracy.toFixed(2)} meters<br>
-          Movement This Update: ${movementDistance.toFixed(2)} meters<br>
-          Total Movement: ${totalMovementDistance.toFixed(2)} meters<br>
-          Low Accuracy Counter: ${lowAccuracyCounter} seconds<br>`;
-
-        if (map) {
-          map.setView([lat, lon], 18);
-          if (!marker) {
-            marker = L.marker([lat, lon]).addTo(map);
-          } else {
-            marker.setLatLng([lat, lon]);
-          }
-
-          if (!circle) {
-            circle = L.circle([lat, lon], { radius: accuracy }).addTo(map);
-          } else {
-            circle.setLatLng([lat, lon]).setRadius(accuracy);
-          }
-        }
       }
 
-      function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-        const R = 6371;
-        const dLat = ((lat2 - lat1) * Math.PI) / 180;
-        const dLon = ((lon2 - lon1) * Math.PI) / 180;
-        const a =
-          Math.sin(dLat / 2) ** 2 +
-          Math.cos((lat1 * Math.PI) / 180) *
-            Math.cos((lat2 * Math.PI) / 180) *
-            Math.sin(dLon / 2) ** 2;
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
-      }
+      updateStatus(
+        isFakeLocation
+          ? "⚠️ Possible Fake Location Detected"
+          : "✔️ Real Location Detected",
+        isFakeLocation
+      );
 
-      function showError(error) {
-        let message = "";
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            message = "User denied the request for Geolocation.";
-            break;
-          case error.POSITION_UNAVAILABLE:
-            message = "Location information is unavailable.";
-            break;
-          case error.TIMEOUT:
-            message = "The request to get user location timed out.";
-            break;
-          default:
-            message = "An unknown error occurred.";
+      lastPosition = { lat, lon };
+
+      document.getElementById("output").innerHTML = `
+        Latitude: ${lat}<br>
+        Longitude: ${lon}<br>
+        Accuracy: ${accuracy.toFixed(2)} meters<br>
+        Movement This Update: ${movementDistance.toFixed(2)} meters<br>
+        Total Movement: ${totalMovementDistance.toFixed(2)} meters<br>
+        Low Accuracy Counter: ${lowAccuracyCounter} seconds<br>`;
+
+      if (map) {
+        map.setView([lat, lon], 18);
+        if (!marker) {
+          marker = L.marker([lat, lon]).addTo(map);
+        } else {
+          marker.setLatLng([lat, lon]);
         }
-        document.getElementById("output").innerText = message;
-        updateStatus(message, true);
+
+        if (!circle) {
+          circle = L.circle([lat, lon], { radius: accuracy }).addTo(map);
+        } else {
+          circle.setLatLng([lat, lon]).setRadius(accuracy);
+        }
       }
-    </script>
-  </body>
+    }
+
+    function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    function showError(error) {
+      let message = "";
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          message = "User denied the request for Geolocation.";
+          break;
+        case error.POSITION_UNAVAILABLE:
+          message = "Location information is unavailable.";
+          break;
+        case error.TIMEOUT:
+          message = "The request to get user location timed out.";
+          break;
+        default:
+          message = "An unknown error occurred.";
+      }
+      document.getElementById("output").innerText = message;
+      updateStatus(message, true);
+    }
+  </script>
+</body>
 </html>
