@@ -35,11 +35,13 @@
       let lastPosition = null;
       let lastTimestamp = null;
       let ipLocation = null;
+      let freezeCounter = 0;
+      const FREEZE_THRESHOLD_SECONDS = 10;
+      const MIN_MOVEMENT_METERS = 3;
 
-      // Fetch IP-based location for comparison
       fetch("https://ipapi.co/json/")
-        .then(res => res.json())
-        .then(data => {
+        .then((res) => res.json())
+        .then((data) => {
           ipLocation = {
             lat: parseFloat(data.latitude),
             lon: parseFloat(data.longitude),
@@ -47,7 +49,7 @@
           };
           console.log("IP Location Approx:", ipLocation);
         })
-        .catch(err => console.warn("IP location fetch failed", err));
+        .catch((err) => console.warn("IP location fetch failed", err));
 
       function startWatching() {
         if (!map) {
@@ -81,23 +83,43 @@
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
         const accuracy = position.coords.accuracy;
-        const currentTime = new Date().getTime();
+        const currentTime = Date.now();
 
-        // Accuracy check
-        if (accuracy > 1000) {
-          document.getElementById("output").innerHTML = `Low accuracy: ${accuracy.toFixed(2)} meters. Ignored.`;
-          return;
+        let movementDistance = 0;
+        if (lastPosition) {
+          movementDistance = getDistanceFromLatLonInKm(
+            lastPosition.lat,
+            lastPosition.lon,
+            lat,
+            lon
+          ) * 1000; // convert km to meters
         }
 
         // Speed check
         if (lastPosition && lastTimestamp) {
-          const distance = getDistanceFromLatLonInKm(lastPosition.lat, lastPosition.lon, lat, lon);
-          const timeDiff = (currentTime - lastTimestamp) / 1000;
-          const speed = distance / (timeDiff / 3600);
+          const timeDiff = (currentTime - lastTimestamp) / 1000; // seconds
+          const speed = (movementDistance / 1000) / (timeDiff / 3600); // km/h
           if (speed > 300) {
             document.getElementById("output").innerHTML = `Unrealistic speed: ${speed.toFixed(2)} km/h. Ignored.`;
             return;
           }
+        }
+
+        // Movement + freeze check + accuracy logic
+        if (accuracy > 5 && movementDistance >= MIN_MOVEMENT_METERS) {
+          freezeCounter = 0;
+          console.log("✔️ Real GPS: Accuracy > 5m with movement detected.");
+        } else if (accuracy <= 3) {
+          if (movementDistance < MIN_MOVEMENT_METERS) {
+            freezeCounter++;
+            if (freezeCounter >= FREEZE_THRESHOLD_SECONDS) {
+              document.getElementById("output").innerHTML += `<br>⚠️ Suspected mock location: Accuracy ${accuracy.toFixed(2)}m, frozen for ${FREEZE_THRESHOLD_SECONDS} seconds.`;
+            }
+          } else {
+            freezeCounter = 0;
+          }
+        } else {
+          freezeCounter = 0;
         }
 
         // IP location cross-check
@@ -114,7 +136,8 @@
         document.getElementById("output").innerHTML = `
           Latitude: ${lat}<br>
           Longitude: ${lon}<br>
-          Accuracy: ${accuracy.toFixed(2)} meters<br>`;
+          Accuracy: ${accuracy.toFixed(2)} meters<br>
+          Movement since last: ${movementDistance.toFixed(2)} meters<br>`;
 
         if (map) {
           map.setView([lat, lon], 18);
