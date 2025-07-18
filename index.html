@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -47,18 +48,18 @@
 
       const FAKE_ACCURACY_THRESHOLD_METERS = 5;
       const FAKE_DURATION_SECONDS = 5;
-      const MIN_MOVEMENT_METERS = 1; // movement threshold per update
+      const MIN_MOVEMENT_METERS = 0.1; // movement threshold per update
 
       fetch("https://ipapi.co/json/")
-        .then(res => res.json())
-        .then(data => {
+        .then((res) => res.json())
+        .then((data) => {
           ipLocation = {
             lat: parseFloat(data.latitude),
             lon: parseFloat(data.longitude),
             city: data.city,
           };
         })
-        .catch(err => console.warn("IP location fetch failed", err));
+        .catch((err) => console.warn("IP location fetch failed", err));
 
       function updateStatus(message, isFake) {
         const status = document.getElementById("status");
@@ -75,14 +76,20 @@
         }
 
         if (navigator.geolocation) {
-          watchId = navigator.geolocation.watchPosition(showPosition, showError, {
-            enableHighAccuracy: true,
-            timeout: 20000,
-            maximumAge: 0,
-          });
-          document.getElementById("output").innerHTML = "Waiting for GPS data...";
+          watchId = navigator.geolocation.watchPosition(
+            showPosition,
+            showError,
+            {
+              enableHighAccuracy: true,
+              timeout: 20000,
+              maximumAge: 0,
+            }
+          );
+          document.getElementById("output").innerHTML =
+            "Waiting for GPS data...";
         } else {
-          document.getElementById("output").innerText = "Geolocation not supported.";
+          document.getElementById("output").innerText =
+            "Geolocation not supported.";
         }
       }
 
@@ -105,14 +112,22 @@
 
         if (lastPosition) {
           movementDistance =
-            getDistanceFromLatLonInKm(lastPosition.lat, lastPosition.lon, lat, lon) * 1000;
+            getDistanceFromLatLonInKm(
+              lastPosition.lat,
+              lastPosition.lon,
+              lat,
+              lon
+            ) * 1000;
           if (movementDistance >= MIN_MOVEMENT_METERS) {
             totalMovementDistance += movementDistance;
           }
         }
 
         // Only increment lowAccuracyCounter if there’s no movement
-        if (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS && movementDistance < MIN_MOVEMENT_METERS) {
+        if (
+          accuracy <= FAKE_ACCURACY_THRESHOLD_METERS &&
+          movementDistance < MIN_MOVEMENT_METERS
+        ) {
           lowAccuracyCounter++;
         } else {
           lowAccuracyCounter = 0;
@@ -123,7 +138,12 @@
         }
 
         if (ipLocation) {
-          const ipDist = getDistanceFromLatLonInKm(lat, lon, ipLocation.lat, ipLocation.lon);
+          const ipDist = getDistanceFromLatLonInKm(
+            lat,
+            lon,
+            ipLocation.lat,
+            ipLocation.lon
+          );
           if (ipDist > 50) {
             isFakeLocation = true;
           }
