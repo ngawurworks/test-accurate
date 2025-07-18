@@ -41,9 +41,10 @@
     let lastPosition = null;
     let lastTimestamp = null;
     let ipLocation = null;
-    let freezeCounter = 0;
-    const FREEZE_THRESHOLD_SECONDS = 10;
-    const MIN_MOVEMENT_METERS = 3;
+
+    let lowAccuracyCounter = 0;
+    const FAKE_ACCURACY_THRESHOLD_METERS = 5;
+    const FAKE_DURATION_SECONDS = 5;
 
     fetch("https://ipapi.co/json/")
       .then(res => res.json())
@@ -97,38 +98,20 @@
       const accuracy = position.coords.accuracy;
       const currentTime = Date.now();
 
-      let movementDistance = 0;
-      if (lastPosition) {
-        movementDistance =
-          getDistanceFromLatLonInKm(lastPosition.lat, lastPosition.lon, lat, lon) * 1000;
-      }
-
       let isFakeLocation = false;
 
-      if (lastPosition && lastTimestamp) {
-        const timeDiff = (currentTime - lastTimestamp) / 1000;
-        const speed = movementDistance / 1000 / (timeDiff / 3600);
-        if (speed > 300) {
-          document.getElementById("output").innerHTML = `Unrealistic speed: ${speed.toFixed(2)} km/h. Ignored.`;
-          isFakeLocation = true;
-        }
-      }
-
-      if (accuracy > 5 && movementDistance >= MIN_MOVEMENT_METERS) {
-        freezeCounter = 0;
-      } else if (accuracy <= 3) {
-        if (movementDistance < MIN_MOVEMENT_METERS) {
-          freezeCounter++;
-          if (freezeCounter >= FREEZE_THRESHOLD_SECONDS) {
-            isFakeLocation = true;
-          }
-        } else {
-          freezeCounter = 0;
-        }
+      // 1️⃣ Fake detection based on continuous low accuracy
+      if (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS) {
+        lowAccuracyCounter++;
       } else {
-        freezeCounter = 0;
+        lowAccuracyCounter = 0;
       }
 
+      if (lowAccuracyCounter >= FAKE_DURATION_SECONDS) {
+        isFakeLocation = true;
+      }
+
+      // 2️⃣ IP distance check (optional cross check)
       if (ipLocation) {
         const ipDist = getDistanceFromLatLonInKm(lat, lon, ipLocation.lat, ipLocation.lon);
         if (ipDist > 50) {
@@ -136,7 +119,12 @@
         }
       }
 
-      updateStatus(isFakeLocation ? "⚠️ Possible Fake Location Detected" : "✔️ Real Location Detected", isFakeLocation);
+      updateStatus(
+        isFakeLocation
+          ? "⚠️ Possible Fake Location Detected (Accuracy < 5m for 5s)"
+          : "✔️ Real Location Detected",
+        isFakeLocation
+      );
 
       lastPosition = { lat, lon };
       lastTimestamp = currentTime;
@@ -145,7 +133,7 @@
         Latitude: ${lat}<br>
         Longitude: ${lon}<br>
         Accuracy: ${accuracy.toFixed(2)} meters<br>
-        Movement since last: ${movementDistance.toFixed(2)} meters<br>`;
+        Low Accuracy Counter: ${lowAccuracyCounter} seconds<br>`;
 
       if (map) {
         map.setView([lat, lon], 18);
