@@ -3,9 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GPS Tracking with Anti-Fake Check</title>
+    <title>GPS Tracking with Anti-Fake Location Check</title>
 
-    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <style>
       body {
@@ -28,17 +27,27 @@
     <div id="output"></div>
     <div id="map"></div>
 
-    <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
     <script>
       let watchId = null;
-      let map;
-      let marker;
-      let circle;
-
+      let map, marker, circle;
       let lastPosition = null;
       let lastTimestamp = null;
+      let ipLocation = null;
+
+      // Fetch IP-based location for comparison
+      fetch("https://ipapi.co/json/")
+        .then(res => res.json())
+        .then(data => {
+          ipLocation = {
+            lat: parseFloat(data.latitude),
+            lon: parseFloat(data.longitude),
+            city: data.city,
+          };
+          console.log("IP Location Approx:", ipLocation);
+        })
+        .catch(err => console.warn("IP location fetch failed", err));
 
       function startWatching() {
         if (!map) {
@@ -74,25 +83,28 @@
         const accuracy = position.coords.accuracy;
         const currentTime = new Date().getTime();
 
+        // Accuracy check
         if (accuracy > 1000) {
           document.getElementById("output").innerHTML = `Low accuracy: ${accuracy.toFixed(2)} meters. Ignored.`;
           return;
         }
 
+        // Speed check
         if (lastPosition && lastTimestamp) {
-          const distance = getDistanceFromLatLonInKm(
-            lastPosition.lat,
-            lastPosition.lon,
-            lat,
-            lon
-          );
-          const timeDiff = (currentTime - lastTimestamp) / 1000; // seconds
-          const speed = distance / (timeDiff / 3600); // km/h
-
+          const distance = getDistanceFromLatLonInKm(lastPosition.lat, lastPosition.lon, lat, lon);
+          const timeDiff = (currentTime - lastTimestamp) / 1000;
+          const speed = distance / (timeDiff / 3600);
           if (speed > 300) {
-            document.getElementById("output").innerHTML = `
-              Unrealistic speed detected: ${speed.toFixed(2)} km/h. Ignoring location.`;
+            document.getElementById("output").innerHTML = `Unrealistic speed: ${speed.toFixed(2)} km/h. Ignored.`;
             return;
+          }
+        }
+
+        // IP location cross-check
+        if (ipLocation) {
+          const ipDist = getDistanceFromLatLonInKm(lat, lon, ipLocation.lat, ipLocation.lon);
+          if (ipDist > 50) {
+            document.getElementById("output").innerHTML += `<br>⚠️ IP location mismatch: ${ipDist.toFixed(2)} km from IP city (${ipLocation.city}). Possible fake location.`;
           }
         }
 
@@ -106,7 +118,6 @@
 
         if (map) {
           map.setView([lat, lon], 18);
-
           if (!marker) {
             marker = L.marker([lat, lon]).addTo(map);
           } else {
@@ -123,14 +134,13 @@
 
       function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
         const R = 6371;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
         const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat1 * Math.PI / 180) *
-            Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) ** 2;
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
       }
@@ -147,9 +157,8 @@
           case error.TIMEOUT:
             message = "The request to get user location timed out.";
             break;
-          case error.UNKNOWN_ERROR:
+          default:
             message = "An unknown error occurred.";
-            break;
         }
         document.getElementById("output").innerText = message;
       }
