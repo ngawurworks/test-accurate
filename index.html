@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GPS Tracking Identifying Status</title>
+  <title>GPS Tracking with Real/Fake Location Detection</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body {
@@ -39,23 +39,24 @@
     let map, marker, circle;
     let lastPosition = null;
     let ipLocation = null;
+
     let lowAccuracyCounter = 0;
     let totalMovementDistance = 0;
 
     const FAKE_ACCURACY_THRESHOLD_METERS = 5;
     const FAKE_DURATION_SECONDS = 5;
-    const MIN_MOVEMENT_METERS = 50;
+    const MIN_MOVEMENT_METERS = 1; // Changed to 1 meter as requested
 
     fetch("https://ipapi.co/json/")
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         ipLocation = {
           lat: parseFloat(data.latitude),
           lon: parseFloat(data.longitude),
           city: data.city,
         };
       })
-      .catch(err => console.warn("IP location fetch failed", err));
+      .catch((err) => console.warn("IP location fetch failed", err));
 
     function updateStatus(message, color) {
       const status = document.getElementById("status");
@@ -75,11 +76,17 @@
         watchId = navigator.geolocation.watchPosition(
           showPosition,
           showError,
-          { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+          {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0,
+          }
         );
-        document.getElementById("output").innerHTML = "Waiting for GPS data...";
+        document.getElementById("output").innerHTML =
+          "Waiting for GPS data...";
       } else {
-        document.getElementById("output").innerText = "Geolocation not supported.";
+        document.getElementById("output").innerText =
+          "Geolocation not supported.";
       }
     }
 
@@ -97,46 +104,57 @@
       const lon = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
+      let isFakeLocation = false;
       let movementDistance = 0;
 
       if (lastPosition) {
-        movementDistance = getDistanceFromLatLonInKm(
-          lastPosition.lat, lastPosition.lon, lat, lon
-        ) * 1000;
+        movementDistance =
+          getDistanceFromLatLonInKm(
+            lastPosition.lat,
+            lastPosition.lon,
+            lat,
+            lon
+          ) * 1000;
         if (movementDistance >= MIN_MOVEMENT_METERS) {
           totalMovementDistance += movementDistance;
         }
       }
 
-      if (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS && movementDistance < MIN_MOVEMENT_METERS) {
+      if (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS &&
+          movementDistance < MIN_MOVEMENT_METERS) {
         lowAccuracyCounter++;
       } else {
         lowAccuracyCounter = 0;
       }
 
-      let statusMessage = "";
-      let statusColor = "";
-
-      if (lowAccuracyCounter >= FAKE_DURATION_SECONDS) {
-        statusMessage = "⚠️ Possible Fake Location Detected";
-        statusColor = "red";
-      } else if (lowAccuracyCounter > 0) {
-        statusMessage = `Identifying... (${lowAccuracyCounter}s)`;
-        statusColor = "orange";
+      if (lowAccuracyCounter < FAKE_DURATION_SECONDS) {
+        updateStatus("⏳ Identifying... (" + lowAccuracyCounter + "s)", "orange");
       } else {
-        statusMessage = "✔️ Real Location Detected";
-        statusColor = "green";
-      }
-
-      if (ipLocation) {
-        const ipDist = getDistanceFromLatLonInKm(lat, lon, ipLocation.lat, ipLocation.lon);
-        if (ipDist > 50) {
-          statusMessage = "⚠️ Possible Fake Location Detected (IP mismatch)";
-          statusColor = "red";
+        if (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS &&
+            movementDistance < MIN_MOVEMENT_METERS) {
+          isFakeLocation = true;
         }
       }
 
-      updateStatus(statusMessage, statusColor);
+      if (ipLocation) {
+        const ipDist = getDistanceFromLatLonInKm(
+          lat,
+          lon,
+          ipLocation.lat,
+          ipLocation.lon
+        );
+        if (ipDist > 50) {
+          isFakeLocation = true;
+        }
+      }
+
+      if (lowAccuracyCounter >= FAKE_DURATION_SECONDS) {
+        if (isFakeLocation) {
+          updateStatus("⚠️ Possible Fake Location Detected", "red");
+        } else {
+          updateStatus("✔️ Real Location Detected", "green");
+        }
+      }
 
       lastPosition = { lat, lon };
 
