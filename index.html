@@ -217,10 +217,16 @@
   let watchId = null;
   let map, marker, circle;
   let lastPosition = null;
-  let lastLatLonCheck = null;
-  let staticPositionStartTime = null;
 
+  let lowAccuracyStartTime = null;
+  let staticPositionStartTime = null;
+  let totalMovementDistance = 0;
+
+  const FAKE_ACCURACY_THRESHOLD_METERS = 5;
+  const HIGH_ACCURACY_THRESHOLD = 1000;
+  const FAKE_DURATION_SECONDS = 5;
   const STATIC_DURATION_SECONDS = 5;
+  const MIN_MOVEMENT_METERS = 0.1;
 
   function updateStatus(message, isFake) {
     const status = document.getElementById("status");
@@ -237,15 +243,11 @@
     }
 
     if (navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition(
-        showPosition,
-        showError,
-        {
-          enableHighAccuracy: true,
-          timeout: 20000,
-          maximumAge: 0,
-        }
-      );
+      watchId = navigator.geolocation.watchPosition(showPosition, showError, {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      });
       document.getElementById("output").innerHTML = "Waiting for GPS data...";
     } else {
       document.getElementById("output").innerText = "Geolocation not supported.";
@@ -264,29 +266,56 @@
   function showPosition(position) {
     const lat = position.coords.latitude;
     const lon = position.coords.longitude;
+    const accuracy = position.coords.accuracy;
 
-    let isStatic = false;
+    let movementDistance = 0;
+    let isFakeLocation = false;
 
     if (lastPosition) {
-      if (lat === lastPosition.lat && lon === lastPosition.lon) {
-        if (!staticPositionStartTime) {
-          staticPositionStartTime = Date.now();
-        }
-      } else {
-        staticPositionStartTime = null;
+      movementDistance =
+        getDistanceFromLatLonInKm(lastPosition.lat, lastPosition.lon, lat, lon) * 1000;
+      if (movementDistance >= MIN_MOVEMENT_METERS) {
+        totalMovementDistance += movementDistance;
       }
     }
 
-    if (staticPositionStartTime) {
-      const elapsed = (Date.now() - staticPositionStartTime) / 1000;
-      if (elapsed >= STATIC_DURATION_SECONDS) {
-        isStatic = true;
+    // Accuracy-based fake detection logic
+    if (
+      (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS || accuracy >= HIGH_ACCURACY_THRESHOLD) &&
+      movementDistance < MIN_MOVEMENT_METERS
+    ) {
+      if (!lowAccuracyStartTime) {
+        lowAccuracyStartTime = Date.now();
       }
+    } else {
+      lowAccuracyStartTime = null;
     }
 
-    if (isStatic) {
-      updateStatus("⚠️ Fake Location Detected (Static)", true);
-    } else if (staticPositionStartTime) {
+    // Static position fake detection logic
+    if (lastPosition && lat === lastPosition.lat && lon === lastPosition.lon) {
+      if (!staticPositionStartTime) {
+        staticPositionStartTime = Date.now();
+      }
+    } else {
+      staticPositionStartTime = null;
+    }
+
+    const elapsedLowAccuracy = lowAccuracyStartTime
+      ? (Date.now() - lowAccuracyStartTime) / 1000
+      : 0;
+    const elapsedStatic = staticPositionStartTime
+      ? (Date.now() - staticPositionStartTime) / 1000
+      : 0;
+
+    if (elapsedLowAccuracy >= FAKE_DURATION_SECONDS || elapsedStatic >= STATIC_DURATION_SECONDS) {
+      isFakeLocation = true;
+    } else if (elapsedLowAccuracy > 0 || elapsedStatic > 0) {
+      isFakeLocation = null; // Still identifying
+    }
+
+    if (isFakeLocation === true) {
+      updateStatus("⚠️ Fake Location Detected", true);
+    } else if (isFakeLocation === null) {
       updateStatus("Identifying...", false);
     } else {
       updateStatus("✔️ Real Location", false);
@@ -297,11 +326,11 @@
     document.getElementById("output").innerHTML = `
       Latitude: ${lat}<br>
       Longitude: ${lon}<br>
-      Static Timer: ${
-        staticPositionStartTime
-          ? ((Date.now() - staticPositionStartTime) / 1000).toFixed(1) + "s"
-          : "0s"
-      }<br>
+      Accuracy: ${accuracy.toFixed(2)} meters<br>
+      Movement This Update: ${movementDistance.toFixed(2)} meters<br>
+      Total Movement: ${totalMovementDistance.toFixed(2)} meters<br>
+      Identifying Timer (Accuracy): ${elapsedLowAccuracy.toFixed(1)}s<br>
+      Identifying Timer (Static): ${elapsedStatic.toFixed(1)}s<br>
     `;
 
     if (map) {
@@ -313,11 +342,22 @@
       }
 
       if (!circle) {
-        circle = L.circle([lat, lon], { radius: position.coords.accuracy }).addTo(map);
+        circle = L.circle([lat, lon], { radius: accuracy }).addTo(map);
       } else {
-        circle.setLatLng([lat, lon]).setRadius(position.coords.accuracy);
+        circle.setLatLng([lat, lon]).setRadius(accuracy);
       }
     }
+  }
+
+  function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   }
 
   function showError(error) {
@@ -339,6 +379,7 @@
     updateStatus(message, true);
   }
 </script>
+
 
   </body>
 </html>
