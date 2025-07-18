@@ -389,11 +389,11 @@
     let totalMovementDistance = 0;
     let identifyingStartTime = null;
 
-    const FAKE_ACCURACY_THRESHOLD_METERS = 5;
+    const FAKE_ACCURACY_THRESHOLD_METERS = 3;
     const HIGH_ACCURACY_THRESHOLD = 1000;
     const STATIC_DURATION_SECONDS = 5;
     const IDENTIFYING_PERIOD_SECONDS = 5;
-    const MIN_MOVEMENT_METERS = 0.1;
+    const MIN_MOVEMENT_METERS = 0.01;
 
     function updateStatus(message, isFake) {
       const status = document.getElementById("status");
