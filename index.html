@@ -3,13 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GPS Tracking with Status Identifying</title>
+  <title>GPS Tracking - Real or Fake Location Detection</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
-    body { margin: 0; font-family: sans-serif; }
-    #map { height: 80vh; width: 100%; }
-    button { margin: 10px; padding: 10px 20px; }
-    #status { font-weight: bold; padding: 10px; background: #f0f0f0; }
+    body {
+      margin: 0;
+      font-family: sans-serif;
+    }
+    #map {
+      height: 80vh;
+      width: 100%;
+    }
+    button {
+      margin: 10px;
+      padding: 10px 20px;
+    }
+    #status {
+      font-weight: bold;
+      padding: 10px;
+      background: #f0f0f0;
+    }
   </style>
 </head>
 <body>
@@ -20,35 +33,22 @@
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
   <script>
     let watchId = null;
     let map, marker, circle;
     let lastPosition = null;
-    let ipLocation = null;
 
-    let lowAccuracyCounter = 0;
+    let lowAccuracyStartTime = null;
     let totalMovementDistance = 0;
 
     const FAKE_ACCURACY_THRESHOLD_METERS = 5;
     const FAKE_DURATION_SECONDS = 5;
     const MIN_MOVEMENT_METERS = 0.1;
 
-    fetch("https://ipapi.co/json/")
-      .then(res => res.json())
-      .then(data => {
-        ipLocation = {
-          lat: parseFloat(data.latitude),
-          lon: parseFloat(data.longitude),
-          city: data.city,
-        };
-      })
-      .catch(err => console.warn("IP location fetch failed", err));
-
-    function updateStatus(message, color) {
+    function updateStatus(message, isFake) {
       const status = document.getElementById("status");
       status.innerHTML = `Status: ${message}`;
-      status.style.color = color;
+      status.style.color = isFake ? "red" : "green";
     }
 
     function startWatching() {
@@ -63,7 +63,11 @@
         watchId = navigator.geolocation.watchPosition(
           showPosition,
           showError,
-          { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+          {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0,
+          }
         );
         document.getElementById("output").innerHTML = "Waiting for GPS data...";
       } else {
@@ -76,7 +80,7 @@
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
         document.getElementById("output").innerHTML = "GPS tracking stopped.";
-        updateStatus("GPS tracking stopped.", "black");
+        updateStatus("GPS tracking stopped.", false);
       }
     }
 
@@ -85,54 +89,45 @@
       const lon = position.coords.longitude;
       const accuracy = position.coords.accuracy;
 
+      let isFakeLocation = false;
       let movementDistance = 0;
 
       if (lastPosition) {
-        movementDistance =
-          getDistanceFromLatLonInKm(
-            lastPosition.lat,
-            lastPosition.lon,
-            lat,
-            lon
-          ) * 1000;
+        movementDistance = getDistanceFromLatLonInKm(
+          lastPosition.lat,
+          lastPosition.lon,
+          lat,
+          lon
+        ) * 1000;
         if (movementDistance >= MIN_MOVEMENT_METERS) {
           totalMovementDistance += movementDistance;
         }
       }
 
-      // Fake location detection logic
       if (accuracy <= FAKE_ACCURACY_THRESHOLD_METERS && movementDistance < MIN_MOVEMENT_METERS) {
-        lowAccuracyCounter++;
+        if (!lowAccuracyStartTime) {
+          lowAccuracyStartTime = Date.now();
+        }
       } else {
-        lowAccuracyCounter = 0;
+        lowAccuracyStartTime = null;
       }
 
-      let statusMessage = "✔️ Real Location Detected";
-      let statusColor = "green";
-
-      if (lowAccuracyCounter > 0 && lowAccuracyCounter < FAKE_DURATION_SECONDS) {
-        statusMessage = "⏳ Identifying...";
-        statusColor = "orange";
-      } else if (lowAccuracyCounter >= FAKE_DURATION_SECONDS) {
-        statusMessage = "⚠️ Fake Location Detected";
-        statusColor = "red";
-      }
-
-      // IP check logic (optional)
-      if (ipLocation) {
-        const ipDist = getDistanceFromLatLonInKm(
-          lat,
-          lon,
-          ipLocation.lat,
-          ipLocation.lon
-        );
-        if (ipDist > 50) {
-          statusMessage = "⚠️ Fake Location Detected (IP Mismatch)";
-          statusColor = "red";
+      if (lowAccuracyStartTime) {
+        const elapsed = (Date.now() - lowAccuracyStartTime) / 1000;
+        if (elapsed >= FAKE_DURATION_SECONDS) {
+          isFakeLocation = true;
+        } else {
+          isFakeLocation = null; // Means identifying, not decided yet
         }
       }
 
-      updateStatus(statusMessage, statusColor);
+      if (isFakeLocation === true) {
+        updateStatus("⚠️ Fake Location Detected", true);
+      } else if (isFakeLocation === null) {
+        updateStatus("Identifying...", false);
+      } else {
+        updateStatus("✔️ Real Location", false);
+      }
 
       lastPosition = { lat, lon };
 
@@ -142,7 +137,12 @@
         Accuracy: ${accuracy.toFixed(2)} meters<br>
         Movement This Update: ${movementDistance.toFixed(2)} meters<br>
         Total Movement: ${totalMovementDistance.toFixed(2)} meters<br>
-        Low Accuracy Counter: ${lowAccuracyCounter} seconds<br>`;
+        Identifying Timer: ${
+          lowAccuracyStartTime
+            ? ((Date.now() - lowAccuracyStartTime) / 1000).toFixed(1) + "s"
+            : "0s"
+        }<br>
+      `;
 
       if (map) {
         map.setView([lat, lon], 18);
@@ -167,8 +167,8 @@
       const a =
         Math.sin(dLat / 2) ** 2 +
         Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) ** 2;
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) ** 2;
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return R * c;
     }
@@ -189,7 +189,7 @@
           message = "An unknown error occurred.";
       }
       document.getElementById("output").innerText = message;
-      updateStatus(message, "red");
+      updateStatus(message, true);
     }
   </script>
 </body>
